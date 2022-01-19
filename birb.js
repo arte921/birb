@@ -1,29 +1,22 @@
-const zichtafstand = 20;
+const zichtafstand = 50;
 const dimensies = 2;
-const streefafstand = 2;
+
+const aantal = 30;
+
+const ruimte = [800, 800];
+const beginsnelheid = 10;
+
+const streefafstand = 20;
+const grensafstand = 30;
 
 const cohesiekracht = 10;
-const parralelkracht = 10;
-const vermijdingskracht = 10;
-const eigenkracht = 10;
+const parralelkracht = 40;
+const vermijdingskracht = 100;
+const grenskracht = 10;
+const eigenkracht = 100;
 
 const eigensnelheidskracht = 10;
 const gemiddeldesnelheidskracht = 10;
-
-const boids = [
-    {
-        pos: [10, 10],
-        snelheid: [2, 3]
-    },
-    {
-        pos: [3, 4],
-        snelheid: [3, 2]
-    },
-    {
-        pos: [5, 2],
-        snelheid: [4, 1]
-    }
-];
 
 const vds = callback => (...argument) => callback(vds(callback))(...argument);
 const it = (aantal, waarde) => Array.from(Array(aantal)).map((_, i) => waarde || i);
@@ -31,7 +24,13 @@ const totaal = array => array.reduce((a, b) => a + b);
 
 const dimensielijst = it(dimensies);
 
+const niets = dimensielijst.map(() => 0);
+
+const posities = boids => boids.map(b => b.pos);
+const snelheden = boids => boids.map(b => b.snelheid);
+
 const verschil = (a, b) => dimensielijst.map(d => a[d] - b[d]);
+const som = vectoren => dimensielijst.map(d => totaal(vectoren.map(v => v[d])));
 
 const lengte = vector => Math.sqrt(totaal(vector.map(c => c ** 2)));
 
@@ -45,28 +44,33 @@ const gemiddelde = vectoren => vectoren
 
 const zichtbareBoids = (boid, boids, radius = zichtafstand) => boids.filter(mate => afstand(mate.pos, boid.pos) <= radius && mate != boid);
 
-const boidsMetStats = (boid, boids) => ({
-    mates: boids.map(mate => ({
-        ...mate,
-        afstand: afstand(boid.pos, mate.pos),
-        absoluteSnelheid: lengte(boid.snelheid)
-    })),
-    centrum: gemiddelde(boids.map(b => b.pos)),
-    richting: metLengte(gemiddelde(boids.map(b => b.snelheid))),
-    snelheid: lengte(gemiddelde(boids.map(b => b.snelheid)))
-});
-
 const step = boids => boids.map(boid => {
-    const zichtbareMates = boidsMetStats(boid, zichtbareBoids(boid, boids));
+    const {
+        pos,
+        snelheid
+    } = boid;
 
-    const cohesie = metLengte(verschil(zichtbareMates.centrum, boid.pos), cohesiekracht);
-    const parralel = metLengte(zichtbareMates.richting, parralelkracht);
-    const eigen = metLengte(boid.snelheid, eigenkracht);
+    const mates = zichtbareBoids(boid, boids);
 
-    const snelheid = (zichtbareMates.snelheid * gemiddeldesnelheidskracht + lengte(boid.snelheid) * eigensnelheidskracht) / (gemiddeldesnelheidskracht + eigensnelheidskracht);
+    const eigen = metLengte(snelheid, eigenkracht);
+    const grenzen = metLengte(dimensielijst.map(d => -1 * (pos[d] - ruimte[d] / 2) ** 3), grenskracht);
 
-    const resultaatsnelheid = metLengte(gemiddelde([cohesie, parralel, eigen]), snelheid);
-    const resultaatpositie = totaal([boid.pos, resultaatsnelheid]);
+    if (mates.length == 0) return {
+        pos: som([pos, snelheid]),
+        snelheid: metLengte(gemiddelde([grenzen, eigen]), beginsnelheid)
+    };
+
+    const matesGoedeAfstand = mates.filter(mate => afstand(mate.pos, pos) >= streefafstand);
+    const matesTeDichtbij = mates.filter(mate => afstand(mate.pos, pos) < streefafstand);
+
+    const vermijden = matesTeDichtbij.length > 0 ? metLengte(gemiddelde(posities(matesTeDichtbij).map(mate => verschil(pos, mate))), vermijdingskracht) : niets;
+    const cohesie = matesGoedeAfstand.length > 0 ? metLengte(verschil(gemiddelde(posities(matesGoedeAfstand)), pos), cohesiekracht) : niets;
+    const parralel = metLengte(metLengte(gemiddelde(snelheden(mates))), parralelkracht);
+
+    // const snelheid = (lengte(gemiddelde(snelheden(mates))) * gemiddeldesnelheidskracht + lengte(snelheid) * eigensnelheidskracht) / (gemiddeldesnelheidskracht + eigensnelheidskracht);
+
+    const resultaatsnelheid = metLengte(gemiddelde([cohesie, parralel, grenzen, vermijden, eigen]), beginsnelheid);
+    const resultaatpositie = som([pos, resultaatsnelheid]);
 
     return {
         pos: resultaatpositie,
@@ -74,25 +78,38 @@ const step = boids => boids.map(boid => {
     };
 });
 
-const boidsTekenaar = id => {
+const boids = it(aantal).map(() => ({
+    pos: dimensielijst.map(d => Math.random() * ruimte[d]),
+    snelheid: metLengte(dimensielijst.map(Math.random), beginsnelheid)
+}));
+
+const boidsTekenaar = (id, ruimte, dimensielijst) => {
     const canvas = document.getElementById(id);
     const ctx = canvas.getContext("2d");
+    
+    const windowsize = [window.innerWidth, window.innerHeight];
+    [canvas.width, canvas.height] = windowsize;
+
+    const offsets = dimensielijst.map(d => (windowsize[d] - ruimte[d]) / 2);
+
     return boids => {
-        
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         boids.forEach(boid => {
+            const [x, y] = dimensielijst.map(d => offsets[d] + boid.pos[d]);
+
             ctx.beginPath();
-            ctx.arc(boid.pos[0], boid.pos[0], 5, 0, 2 * Math.PI);
+            ctx.arc(x, y, 5, 0, 2 * Math.PI);
             ctx.fill();
         });
-    }
+    };
 };
 
-const tekenBoids = boidsTekenaar("canvas");
+const tekenBoids = boidsTekenaar("canvas", ruimte, dimensielijst);
 
 vds(zelf => vorigeBoids => () => {
-    boids = step(vorigeBoids);
+    const boids = step(vorigeBoids);
 
     tekenBoids(boids);
 
     window.requestAnimationFrame(zelf(boids));
-});
+})(boids)();
